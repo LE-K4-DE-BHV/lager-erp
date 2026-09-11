@@ -1,0 +1,147 @@
+# =============================================================================
+# CI-Pipeline – Lager-Management-System (GitHub Actions)
+# Monorepo: backend/ (Spring Boot 3.4.5, Java 25) + frontend/ (Vue 3, Node 20)
+#
+# Jobs laufen parallel:
+#   backend  → mvn verify (Testcontainers), Docker Build
+#   frontend → Node 20, npm ci, Vitest, Docker Build
+#
+# Runner: ubuntu-latest (GitHub-hosted, Docker ist vorinstalliert)
+#
+# CD: nicht enthalten – siehe TODO-Block am Ende dieser Datei.
+# =============================================================================
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - ".github/workflows/ci.yml"
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: "Backend (Java 25 + Maven)"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Java 25 (Temurin) installieren
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+          cache-dependency-path: backend/pom.xml
+
+      # Testcontainers (PostgreSQL) nutzt den Docker-Daemon des Runners – keine
+      # zusätzliche Konfiguration nötig, GitHub-hosted ubuntu-latest bringt Docker mit.
+      - name: Build + Tests (mvn verify)
+        run: mvn --batch-mode verify
+
+      - name: Testergebnisse (JUnit) publizieren
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: "Backend Unit-Tests"
+          path: "backend/target/surefire-reports/TEST-*.xml"
+          reporter: java-junit
+
+      - name: Docker Image bauen (kein Push – Registry noch nicht konfiguriert)
+        run: |
+          docker build \
+            -t lager-backend:${{ github.sha }} \
+            -t lager-backend:ci \
+            -f Dockerfile .
+
+      # TODO: Docker Push aktivieren, sobald die Container-Registry bereit ist.
+      # - name: In Registry einloggen
+      #   uses: docker/login-action@v3
+      #   with:
+      #     registry: ghcr.io
+      #     username: ${{ github.actor }}
+      #     password: ${{ secrets.GITHUB_TOKEN }}
+      # - name: Image pushen
+      #   run: |
+      #     docker tag lager-backend:${{ github.sha }} ghcr.io/${{ github.repository }}/lager-backend:latest
+      #     docker push ghcr.io/${{ github.repository }}/lager-backend:latest
+
+  frontend:
+    name: "Frontend (Node 20 + Vitest)"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node.js 20 installieren
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: npm ci
+        run: npm ci --prefer-offline
+
+      - name: Vitest Tests ausführen
+        run: npm run test -- --run
+
+      - name: Docker Image bauen (kein Push – Registry noch nicht konfiguriert)
+        run: |
+          docker build \
+            -t lager-frontend:${{ github.sha }} \
+            -t lager-frontend:ci \
+            -f Dockerfile .
+
+      # TODO: Docker Push aktivieren, sobald die Container-Registry bereit ist.
+      # - name: In Registry einloggen
+      #   uses: docker/login-action@v3
+      #   with:
+      #     registry: ghcr.io
+      #     username: ${{ github.actor }}
+      #     password: ${{ secrets.GITHUB_TOKEN }}
+      # - name: Image pushen
+      #   run: |
+      #     docker tag lager-frontend:${{ github.sha }} ghcr.io/${{ github.repository }}/lager-frontend:latest
+      #     docker push ghcr.io/${{ github.repository }}/lager-frontend:latest
+
+# =============================================================================
+# CD Deploy (nicht enthalten)
+#
+# TODO: Deploy-Job ergänzen, sobald folgende Ressourcen bereit sind:
+#
+#   1. Container-Registry (z. B. GitHub Container Registry ghcr.io)
+#      → Push in beiden Jobs oben aktivieren (auskommentierte Blöcke)
+#
+#   2. Zugang zum Zielserver (z. B. SSH-Deploy-Key als GitHub-Secret)
+#      → Repository → Settings → Secrets and variables → Actions → New repository secret
+#        z. B. DEPLOY_SSH_KEY, DEPLOY_HOST, DEPLOY_USER
+#
+#   3. .env-Datei auf dem Zielserver
+#      → Pfad: /opt/lager_management/.env
+#      → Inhalt: Alle Variablen aus .env.example mit echten Werten befüllen
+#
+# Danach einen zusätzlichen Job `deploy` ergänzen, der per SSH-Action
+# (z. B. appleboy/ssh-action) `docker compose pull && docker compose up -d`
+# auf dem Zielserver ausführt. `needs: [backend, frontend]` und
+# `if: github.ref == 'refs/heads/main' && github.event_name == 'push'` setzen.
+# =============================================================================

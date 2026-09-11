@@ -1,0 +1,63 @@
+spring:
+  application:
+    name: lager-management
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:db}:5432/${DB_NAME:lagerdb}
+    username: ${DB_USER:lager}
+    password: ${DB_PASSWORD}
+    hikari:
+      connection-timeout: 20000
+      maximum-pool-size: 10
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: none
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: false
+
+  sql:
+    init:
+      mode: always
+
+  security:
+    user:
+      name: operator
+
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
+
+  mail:
+    host: ${MAIL_HOST:localhost}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
+
+app:
+  security:
+    operator-password-hash: ${APP_OPERATOR_PASSWORD_HASH}
+  files:
+    base-path: ${FILES_BASE_PATH:/app/files}
+  reorder:
+    consumption-period-days: 30
+    cron-expression: "0 0 2 * * *"
+  import:
+    cron-expression: "0 */15 * * * *"
+  report:
+    cron-expression: "0 30 6 * * *"
+  mail:
+    enabled: ${MAIL_ENABLED:false}
+    from: ${MAIL_FROM:lager@localhost}
+
+logging:
+  level:
+    com.lagermanagement: INFO
+    org.springframework.security: WARN
